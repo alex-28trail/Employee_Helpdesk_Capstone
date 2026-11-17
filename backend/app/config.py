@@ -1,15 +1,29 @@
 """Application settings, read from environment variables / .env (never hard-coded).
 
-Member A owns this file (F1.2). If A already has a Settings class, add the
-"AI" block below to it instead of replacing the file.
+The database can be configured either with a single DATABASE_URL, or with the
+individual DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD values.
+If DATABASE_URL is not set, it is built from the individual values.
 """
+from urllib.parse import quote_plus
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    database_url: str
+    # --- Database (Member A) ---
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = ""
+    DB_USER: str = ""
+    DB_PASSWORD: str = ""
+    database_url: str = ""
 
     # --- AI (Member B) - any OpenAI-compatible endpoint; OpenRouter by default ---
     ai_base_url: str = "https://openrouter.ai/api/v1"
@@ -22,6 +36,17 @@ class Settings(BaseSettings):
     ai_app_name: str = "EY Helpdesk Capstone"   # label shown in your OpenRouter activity page
 
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def build_database_url(self) -> "Settings":
+        if not self.database_url:
+            if not (self.DB_NAME and self.DB_USER):
+                raise ValueError("Set DATABASE_URL, or DB_NAME/DB_USER/DB_PASSWORD (+ DB_HOST/DB_PORT)")
+            self.database_url = (
+                f"postgresql+psycopg://{quote_plus(self.DB_USER)}:{quote_plus(self.DB_PASSWORD)}"
+                f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+            )
+        return self
 
 
 settings = Settings()
