@@ -13,8 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models.ai import AIFeedback, AISuggestion
-from app.models.ticket import Ticket, TicketActivity
+from app.models import AIFeedback, AISuggestion, Ticket, TicketActivity
 from app.schemas.ai import AIFeedbackIn, AIFeedbackOut, AISuggestionOut
 from app.services.ai_service import AIService, AIServiceError, get_ai_service
 
@@ -71,8 +70,9 @@ def run_ai_analysis(ticket_id: int, db: Session = Depends(get_db), ai: AIService
     db.add(suggestion)
     db.add(TicketActivity(
         ticket_id=ticket.id,
-        action="ai_analysis",
-        note=f"AI suggested {result.category.value} / {result.priority.value} (advisory, not applied)",
+        performed_by="AI assistant",
+        activity_type="ai_analysis",
+        description=f"AI suggested {result.category.value} / {result.priority.value} (advisory, not applied)",
     ))
     db.commit()
     db.refresh(suggestion)
@@ -133,14 +133,14 @@ def record_ai_feedback(suggestion_id: int, payload: AIFeedbackIn, db: Session = 
             payload.final_priority and payload.final_priority.value != final_priority
         ):
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                422,
                 "Accepted feedback must keep the suggested values. Use decision 'corrected' to change them.",
             )
     else:
         final_category, final_priority = payload.final_category.value, payload.final_priority.value
         if (final_category, final_priority) == (suggestion.suggested_category, suggestion.suggested_priority):
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                422,
                 "Corrected feedback must change the category or priority. Use decision 'accepted' if the suggestion was right.",
             )
 
@@ -167,8 +167,9 @@ def record_ai_feedback(suggestion_id: int, payload: AIFeedbackIn, db: Session = 
     db.add(feedback)
     db.add(TicketActivity(
         ticket_id=ticket.id,
-        action="ai_feedback",
-        note=(
+        performed_by=payload.reviewed_by,
+        activity_type="ai_feedback",
+        description=(
             f"AI suggestion {payload.decision} by support"
             + (f": {', '.join(changes)}" if changes else "; ticket values unchanged")
             + f". Marked {'useful' if payload.useful else 'not useful'}."

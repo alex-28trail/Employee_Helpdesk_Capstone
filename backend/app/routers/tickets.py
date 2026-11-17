@@ -1,96 +1,121 @@
+"""Ticket CRUD and history (F3.1-F3.5)."""
+import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.db import get_db
-from backend.app.models import Ticket, Requester
-from backend.app.schemas.ticket import (
-    TicketCreate,
-    TicketUpdate,
-    TicketResponse
-)
+from app.db import get_db
+from app.models import Requester, Ticket, TicketActivity
+from app.schemas.enums import Category, Priority, Status
+from app.schemas.ticket import ActivityOut, TicketCreate, TicketResponse, TicketUpdate
 
-router = APIRouter(
-    prefix="/api/tickets",
-    tags=["Tickets"]
-)
+router = APIRouter(prefix="/api/tickets", tags=["Tickets"])
+logger = logging.getLogger("helpdesk.tickets")
 
 
-# 1. Create a new ticket
-@router.post("/", response_model=TicketResponse, status_code=201)
-def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
-
-    requester = db.query(Requester).filter(
-        Requester.id == ticket.requester_id
-    ).first()
-
-    if not requester:
-        raise HTTPException(
-            status_code=404,
-            detail="Requester not found"
-        )
-
-    new_ticket = Ticket(
-        requester_id=ticket.requester_id,
-        title=ticket.title,
-        description=ticket.description,
-        category=ticket.category
-    )
-
-    db.add(new_ticket)
-    db.commit()
-    db.refresh(new_ticket)
-
-    return new_ticket
-
-
-# 2. Get all tickets
-@router.get("/", response_model=list[TicketResponse])
-def get_tickets(db: Session = Depends(get_db)):
-    return db.query(Ticket).all()
-
-
-# 3. Get ticket by ID
-@router.get("/{ticket_id}", response_model=TicketResponse)
-def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
-
-    ticket = db.query(Ticket).filter(
-        Ticket.id == ticket_id
-    ).first()
-
-    if not ticket:
-        raise HTTPException(
-            status_code=404,
-            detail="Ticket not found"
-        )
-
+def get_ticket_or_404(db: Session, ticket_id: int) -> Ticket:
+    ticket = db.get(Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Ticket {ticket_id} not found")
     return ticket
 
 
-# 4. Update ticket details
-@router.patch("/{ticket_id}", response_model=TicketResponse)
-def update_ticket(
-    ticket_id: int,
-    ticket_data: TicketUpdate,
-    db: Session = Depends(get_db)
-):
-
-    ticket = db.query(Ticket).filter(
-        Ticket.id == ticket_id
-    ).first()
-
-    if not ticket:
+@router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED, summary="Create a ticket")
+def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)):
+    requester = db.get(Requester, payload.requester_id)
+    if requester is None:
         raise HTTPException(
-            status_code=404,
-            detail="Ticket not found"
+            422,
+            [{"loc": ["body", "requester_id"], "msg": f"Requester {payload.requester_id} does not exist",
+              "type": "value_error"}],
         )
 
-    update_data = ticket_data.model_dump(exclude_unset=True)
-
-    for key, value in update_data.items():
-        setattr(ticket, key, value)
-
+    ticket = Ticket(
+        requester_id=payload.requester_id,
+        title=payload.title,
+        description=payload.description,
+        category=payload.category.value,
+        priority=payload.priority.value,
+        status=Status.NEW.value,
+    )
+    db.add(ticket)
+    db.flush()
+    db.add(TicketActivity(
+        ticket_id=ticket.id,
+        performed_by=requester.name,
+        activity_type="created",
+        description="Ticket created",
+        new_status=Status.NEW.value,
+    ))
     db.commit()
     db.refresh(ticket)
-
+    logger.info("event=ticket_created ticket_id=%s category=%s priority=%s", ticket.id, ticket.category, ticket.priority)
     return ticket
+
+
+@router.get("", response_model=list[TicketResponse], summary="List tickets with requester (filterable)")
+def list_tickets(
+    status_: Optional[Status] = Query(None, alias="status"),
+    category: Optional[Category] = None,
+    priority: Optional[Priority] = None,
+    requester_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    # Join query (F2.3) - same as "tickets_with_requester" in database/queries.sql
+    stmt = select(Ticket).join(Ticket.requester).order_by(Ticket.created_at.desc(), Ticket.id.desc())
+    if status_:
+        stmt = stmt.where(Ticket.status == status_.value)
+    if category:
+        stmt = stmt.where(Ticket.category == category.value)
+    if priority:
+        stmt = stmt.where(Ticket.priority == priority.value)
+    if requester_id:
+        stmt = stmt.where(Ticket.requester_id == requester_id)
+    return db.scalars(stmt).unique().all()
+
+
+@router.get("/{ticket_id}", response_model=TicketResponse, summary="Ticket detail with requester")
+def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
+    return get_ticket_or_404(db, ticket_id)
+
+
+@router.patch("/{ticket_id}", response_model=TicketResponse, summary="Update title, description, category, priority")
+def update_ticket(ticket_id: int, payload: TicketUpdate, db: Session = Depends(get_db)):
+    ticket = get_ticket_or_404(db, ticket_id)
+    data = payload.model_dump(exclude_unset=True, exclude={"performed_by"})
+
+    changes = []
+    for field, value in data.items():
+        if value is None:
+            continue
+        value = value.value if hasattr(value, "value") else value
+        old = getattr(ticket, field)
+        if old != value:
+            setattr(ticket, field, value)
+            # Never write title/description text into history or logs - just note that they changed.
+            changes.append(f"{field} {old} -> {value}" if field in ("category", "priority") else f"{field} edited")
+
+    if changes:
+        db.add(TicketActivity(
+            ticket_id=ticket.id,
+            performed_by=payload.performed_by,
+            activity_type="updated",
+            description="; ".join(changes),
+        ))
+        db.commit()
+        db.refresh(ticket)
+        logger.info("event=ticket_updated ticket_id=%s fields=%s", ticket.id, ",".join(sorted(data)))
+    return ticket
+
+
+@router.get("/{ticket_id}/history", response_model=list[ActivityOut], summary="Activity and status changes, oldest first")
+def ticket_history(ticket_id: int, db: Session = Depends(get_db)):
+    get_ticket_or_404(db, ticket_id)
+    stmt = (
+        select(TicketActivity)
+        .where(TicketActivity.ticket_id == ticket_id)
+        .order_by(TicketActivity.created_at.asc(), TicketActivity.id.asc())
+    )
+    return db.scalars(stmt).all()

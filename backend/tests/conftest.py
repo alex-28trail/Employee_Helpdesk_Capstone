@@ -1,7 +1,7 @@
 """Shared pytest fixtures (F9.1).
 
 Uses a SEPARATE test database (TEST_DATABASE_URL) and replaces the real AI service
-with a fake, so tests never call OpenRouter (no internet or API key needed) and never touch your dev data.
+with a fake, so tests never call Ollama (the model does not need to be running) and never touch your dev data.
 
     createdb helpdesk_test
     export TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/helpdesk_test
@@ -18,17 +18,16 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL  # must be set before the app is 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-import app.models.ai  # noqa: E402,F401  (registers AI tables on Base.metadata)
-import app.models.ticket  # noqa: E402,F401
+import app.models  # noqa: E402,F401  (registers every table on Base.metadata)
 from app.db import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models.ticket import Requester  # noqa: E402
+from app.models import Requester  # noqa: E402
 from app.schemas.ai import AIAnalysisResult  # noqa: E402
 from app.services.ai_service import AnalysisOutcome, get_ai_service  # noqa: E402
 
 
 class FakeAIService:
-    """Stands in for OpenRouter. Set `.error` to an AIServiceError to simulate failures."""
+    """Stands in for Ollama. Set `.error` to an AIServiceError to simulate failures."""
 
     def __init__(self):
         self.error = None
@@ -73,9 +72,9 @@ def client(fake_ai):
 
 @pytest.fixture
 def requester_id():
-    # Adjust field names if Member A's Requester model differs.
     with SessionLocal() as session:
-        requester = Requester(display_name="Asha Kumar", email="asha.kumar@example.com")
+        requester = Requester(employee_id="EMP900", name="Asha Kumar", email="asha.kumar@example.com",
+                              department="Finance")
         session.add(requester)
         session.commit()
         return requester.id

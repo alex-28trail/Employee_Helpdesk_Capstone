@@ -10,7 +10,7 @@ import re
 
 from app.schemas.enums import Category, Priority
 
-PROMPT_VERSION = "v1"  # bump whenever the prompt changes; stored with every suggestion
+PROMPT_VERSION = "v2"  # bump whenever the prompt changes; stored with every suggestion
 
 MAX_TITLE_CHARS = 200
 MAX_DESCRIPTION_CHARS = 4000
@@ -26,7 +26,7 @@ Read one helpdesk ticket and return a JSON object with:
 - "troubleshooting_steps": 3 to 5 short, safe first-line steps a support technician can try, each under 20 words
 
 CATEGORY GUIDE
-- Hardware: physical devices such as laptops, keyboards, mice, monitors, printers, docking stations, phones.
+- Hardware: physical devices such as laptops, keyboards, mice, monitors, printers, docking stations, phones. A device that stops working, lags or is not detected is Hardware, even if a driver might be involved.
 - Software: applications, operating system, installs, updates, licences, crashes, application error messages.
 - Network: Wi-Fi, LAN, VPN, internet, shared drives or file shares that are unreachable, DNS, slow connectivity.
 - Access: accounts, passwords, MFA, permissions, locked-out users, access requests to systems or folders.

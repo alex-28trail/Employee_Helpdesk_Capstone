@@ -1,36 +1,18 @@
-
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.engine import URL
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-from backend.app.config import settings
+from app.config import settings
 
+# Uses settings.database_url (DATABASE_URL, or built from DB_* values), so tests can
+# point the app at a separate *_test database. echo is off: SQL parameters would
+# otherwise put ticket descriptions into the logs (F1.4).
+engine = create_engine(settings.database_url, pool_pre_ping=True)
 
-# Build the PostgreSQL database URL safely
-database_url = URL.create(
-    drivername="postgresql+psycopg",
-    username=settings.DB_USER,
-    password=settings.DB_PASSWORD,
-    host=settings.DB_HOST,
-    port=settings.DB_PORT,
-    database=settings.DB_NAME
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create database engine
-engine = create_engine(database_url, echo=True)
-
-# Create database sessions
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
-
-# Base class for database models
 Base = declarative_base()
 
 
-# Database session dependency
 def get_db():
     db = SessionLocal()
     try:
