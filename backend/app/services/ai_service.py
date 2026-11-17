@@ -1,4 +1,4 @@
-"""AI integration through an OpenAI-compatible API - OpenRouter by default (F5.1, F5.3, F5.4).
+"""AI integration through an OpenAI-compatible API - local Ollama by default (F5.1, F5.3, F5.4).
 
 Flow: build prompt -> POST {AI_BASE_URL}/chat/completions with a JSON schema
       -> json.loads -> Pydantic validation -> AnalysisOutcome.
@@ -105,14 +105,14 @@ class OpenRouterClient:
         try:
             response = self._http.post("/chat/completions", json=payload)
         except httpx.ConnectTimeout as exc:
-            raise AIUnavailableError("The AI service is not reachable. Check the internet connection.") from exc
+            raise AIUnavailableError("The AI service is not reachable. Make sure Ollama is running (ollama serve).") from exc
         except httpx.TimeoutException as exc:
             raise AITimeoutError(
                 f"The AI model did not respond within {self.timeout_seconds:g} seconds. "
                 "You can retry or triage the ticket manually."
             ) from exc
         except httpx.TransportError as exc:
-            raise AIUnavailableError("The AI service is not reachable. Check the internet connection.") from exc
+            raise AIUnavailableError("The AI service is not reachable. Make sure Ollama is running (ollama serve).") from exc
 
         self._raise_for_status(response)
 
@@ -170,13 +170,23 @@ class OpenRouterClient:
             if response.status_code == 404:  # not OpenRouter: /models usually needs auth elsewhere
                 response = self._http.get("/models", timeout=5.0)
         except httpx.HTTPError:
-            return {"status": "unavailable", "model": self.model, "detail": "AI provider not reachable"}
+            return {"status": "unavailable", "model": self.model, "detail": "AI provider not reachable (is Ollama running?)"}
         if response.status_code in (401, 403):
             return {"status": "unavailable", "model": self.model, "detail": "AI provider rejected AI_API_KEY"}
         if response.status_code >= 400:
             return {
                 "status": "unavailable", "model": self.model,
                 "detail": f"AI provider returned HTTP {response.status_code}",
+            }
+        # Ollama lists the locally pulled models; flag a model that hasn't been pulled yet.
+        try:
+            available = {m.get("id") for m in response.json().get("data", []) if isinstance(m, dict)}
+        except (ValueError, AttributeError):
+            available = set()
+        if available and self.model not in available:
+            return {
+                "status": "unavailable", "model": self.model,
+                "detail": f"Model '{self.model}' is not pulled. Run: ollama pull {self.model}",
             }
         return {"status": "ok", "model": self.model}
 

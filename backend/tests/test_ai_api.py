@@ -117,3 +117,20 @@ def test_feedback_can_only_be_given_once(client, ticket_id):
 def test_feedback_on_missing_suggestion_is_404(client):
     response = client.post("/api/ai-suggestions/99999/feedback", json={"decision": "accepted", "useful": True})
     assert response.status_code == 404
+
+
+def test_dashboard_reports_ai_feedback_stats(client, ticket_id):
+    empty = client.get("/api/dashboard/summary").json()["ai"]
+    assert empty["suggestions"] == 0 and empty["acceptance_rate"] is None
+
+    first = client.post(f"/api/tickets/{ticket_id}/ai-analysis").json()
+    client.post(f"/api/ai-suggestions/{first['id']}/feedback", json={"decision": "accepted", "useful": True})
+    second = client.post(f"/api/tickets/{ticket_id}/ai-analysis").json()
+    client.post(f"/api/ai-suggestions/{second['id']}/feedback", json={
+        "decision": "corrected", "useful": False, "final_category": "Network", "final_priority": "High",
+    })
+
+    ai = client.get("/api/dashboard/summary").json()["ai"]
+    assert ai["suggestions"] == 2 and ai["tickets_analysed"] == 1
+    assert (ai["reviewed"], ai["accepted"], ai["corrected"], ai["useful"]) == (2, 1, 1, 1)
+    assert ai["acceptance_rate"] == 50.0 and ai["useful_rate"] == 50.0

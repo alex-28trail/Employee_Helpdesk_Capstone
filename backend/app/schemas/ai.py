@@ -63,6 +63,7 @@ class AIFeedbackIn(BaseModel):
     final_category: Category | None = None
     final_priority: Priority | None = None
     comment: str | None = Field(default=None, max_length=1000)
+    reviewed_by: str = Field(default="Support Staff", min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def corrected_needs_final_values(self):

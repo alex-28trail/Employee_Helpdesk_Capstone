@@ -1,4 +1,4 @@
-"""Application settings, read from environment variables / .env (never hard-coded).
+"""Application settings, read from environment variables / backend/.env (never hard-coded).
 
 The database can be configured either with a single DATABASE_URL, or with the
 individual DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD values.
@@ -25,15 +25,18 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = ""
     database_url: str = ""
 
-    # --- AI (Member B) - any OpenAI-compatible endpoint; OpenRouter by default ---
-    ai_base_url: str = "https://openrouter.ai/api/v1"
-    ai_model: str = "openrouter/free"          # or a specific "<vendor>/<model>:free" id
-    ai_api_key: str = ""                        # set in .env only, never commit it
-    ai_timeout_seconds: float = 45.0
+    # --- AI (Member B) - local Ollama through its OpenAI-compatible API ---
+    ai_base_url: str = "http://localhost:11434/v1"
+    ai_model: str = "qwen2.5:3b"
+    ai_api_key: str = "ollama"                  # Ollama ignores it, but the client requires a value
+    ai_timeout_seconds: float = 60.0            # first call loads the model into memory, so allow a cold start
     ai_max_retries: int = 1                     # extra attempts when output fails validation
-    ai_max_tokens: int = 1500                   # room for "thinking" models to reason AND answer
-    ai_require_structured_output: bool = True   # only route to providers that support JSON schema
-    ai_app_name: str = "EY Helpdesk Capstone"   # label shown in your OpenRouter activity page
+    ai_max_tokens: int = 800
+    ai_require_structured_output: bool = False  # OpenRouter-only routing flag; not used by Ollama
+    ai_app_name: str = ""
+
+    # --- Web ---
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     log_level: str = "INFO"
 
@@ -47,6 +50,10 @@ class Settings(BaseSettings):
                 f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
             )
         return self
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()
